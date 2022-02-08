@@ -19,42 +19,47 @@ $client = ClientBuilder::create()
     ->withDefaultDriver('http')
     ->build();
 
-$loc = json_decode($_POST['location'], true);
-$wifi = json_decode($_POST['wifi'], true);
+$entries = json_decode($_POST['entry'], true);
 
-print_r($wifi);
+foreach($entries as $entry){
 
-$loc['lon'] = round($loc['lon'], 5);
-$loc['lat'] = round($loc['lat'], 5);
+    $loc = $entry['loc'];
+    $wifi = $entry['wifi'];
 
-$exsistingLoc = $client->run('MATCH (l:Location {lon: '.$loc['lon'].', lat: '.$loc['lat'].'}) RETURN l');
 
-if(sizeof($exsistingLoc)==0){
-    $exsistingLoc = $client->run('CREATE (l:Location {lon: '.$loc['lon'].', lat: '.$loc['lat'].', alt: '.$loc['alt'].', address: \''.$loc['address'].'\'}) RETURN l');
-}
+    $loc['lon'] = round($loc['lon'], 5);
+    $loc['lat'] = round($loc['lat'], 5);
 
-$exsistingBSSID = $client->run('MATCH (b:BSSID {mac: \''.$wifi['bssid'].'\'}) RETURN b');
+    $exsistingLoc = $client->run('MATCH (l:Location {lon: '.$loc['lon'].', lat: '.$loc['lat'].'}) RETURN l');
 
-if(sizeof($exsistingBSSID)==0){
-    $exsistingSSID = $client->run('MATCH (s:SSID {namr: \''.$wifi['ssid'].'\'}) RETURN s');
-
-    if(sizeof($exsistingSSID)==0){
-        $exsistingSSID = $client->run('CREATE (s:SSID {name: \''.$wifi['ssid'].'\'}) RETURN s');
+    if(sizeof($exsistingLoc)==0){
+        $exsistingLoc = $client->run('CREATE (l:Location {lon: '.$loc['lon'].', lat: '.$loc['lat'].', alt: '.$loc['alt'].', address: \''.$loc['address'].'\'}) RETURN l');
     }
 
-    $exsistingBSSID = $client->run('CREATE (b:BSSID {mac: \''.$wifi['bssid'].'\'}) RETURN b');
+    $exsistingBSSID = $client->run('MATCH (b:BSSID {mac: \''.$wifi['bssid'].'\'}) RETURN b');
+
+    if(sizeof($exsistingBSSID)==0){
+        $exsistingSSID = $client->run('MATCH (s:SSID {name: \''.$wifi['ssid'].'\'}) RETURN s');
+
+        if(sizeof($exsistingSSID)==0){
+            $exsistingSSID = $client->run('CREATE (s:SSID {name: \''.$wifi['ssid'].'\'}) RETURN s');
+        }
+
+        $exsistingBSSID = $client->run('CREATE (b:BSSID {mac: \''.$wifi['bssid'].'\'}) RETURN b');
+
+        $client->run('
+        MATCH (s:SSID), (b:BSSID)
+        WHERE s.name = \''.$wifi['ssid'].'\' AND b.mac = \''.$wifi['bssid'].'\'
+        CREATE (s)-[:DiffusedBy]->(b)
+        CREATE (b)-[:Named]->(s)
+        ');
+    }
 
     $client->run('
-    MATCH (s:SSID), (b:BSSID)
-    WHERE s.name = \''.$wifi['ssid'].'\' AND b.mac = \''.$wifi['bssid'].'\'
-    CREATE (s)-[:DiffusedBy]->(b)
-    CREATE (b)-[:Named]->(s)
-    ');
-}
+        MATCH (l:Location), (b:BSSID)
+        WHERE l.lon = '.$loc['lon'].' AND l.lat = '.$loc['lat'].' AND b.mac = \''.$wifi['bssid'].'\'
+        CREATE (b)-[:Present {level: '.$wifi['level'].', frequency: '.$wifi['freq'].', date: \'' . $loc['datetime'] . '\'}]->(l)
+        CREATE (l)-[:receives {level: '.$wifi['level'].', frequency: '.$wifi['freq'].', date: \'' . $loc['datetime'] . '\'}]->(b)
+        ');
 
-$client->run('
-    MATCH (l:Location), (b:BSSID)
-    WHERE l.lon = '.$loc['lon'].' AND l.lat = '.$loc['lat'].' AND b.mac = \''.$wifi['bssid'].'\'
-    CREATE (b)-[:Present {level: '.$wifi['level'].', frequency: '.$wifi['freq'].', date: datetime()}]->(l)
-    CREATE (l)-[:receives {level: '.$wifi['level'].', frequency: '.$wifi['freq'].', date: datetime()}]->(b)
-    ');
+}
